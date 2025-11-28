@@ -67,7 +67,7 @@ const App: React.FC = () => {
         
         // Explicitly trigger hardware vibration via Navigator API as a backup
         // This ensures vibration works even if the notification vibration logic is quirky on some Androids
-        if (typeof navigator.vibrate === 'function') {
+        if (navigator.vibrate) {
            navigator.vibrate([200, 100, 200]);
         }
 
@@ -129,13 +129,32 @@ const App: React.FC = () => {
 
   const handleGrantPermission = async () => {
     if (!('Notification' in window)) {
-      alert("This browser does not support desktop notifications");
+      alert("This browser does not support notifications");
       return;
     }
 
+    // Robust permission requester that handles both Promise and Callback based APIs
+    // This is critical for mobile compatibility where implementations vary
+    const requestPermissionSafely = (): Promise<NotificationPermission> => {
+      return new Promise((resolve) => {
+        // We pass the callback to support older browsers/webviews
+        const permissionPromise = Notification.requestPermission((result) => {
+          resolve(result);
+        });
+
+        // If it returns a promise (modern standard), we use that too
+        if (permissionPromise) {
+          permissionPromise.then(resolve).catch((error) => {
+            console.error("Permission request error:", error);
+            // If promise fails, we can check standard property or assume default/denied
+            resolve(Notification.permission); 
+          });
+        }
+      });
+    };
+
     try {
-      // Important: This must be triggered by a direct user action (click)
-      const result = await Notification.requestPermission();
+      const result = await requestPermissionSafely();
       setPermission(result);
       
       if (result === 'granted') {
@@ -144,9 +163,9 @@ const App: React.FC = () => {
         setTimeout(() => {
             startNotifications();
         }, 500);
-      } else {
+      } else if (result === 'denied') {
         // If the user dismissed it or it was automatically denied
-        alert("Permission was not granted. If you want notifications, please enable them in your browser settings (Site Settings > Notifications).");
+        alert("Permission was denied. Please enable notifications in your browser settings.");
       }
     } catch (error) {
       console.error("Error requesting permission", error);
@@ -173,7 +192,7 @@ const App: React.FC = () => {
         Allow & Start
       </button>
       <p className="text-xs text-slate-400 max-w-xs">
-        Note: If nothing happens, check your phone's notification settings for Chrome.
+        Note: If the popup doesn't appear, notifications might be blocked in your browser settings.
       </p>
     </div>
   );
