@@ -28,32 +28,41 @@ const App: React.FC = () => {
   const intervalRef = useRef<number | null>(null);
   
   const sendRandomNotification = useCallback(() => {
-    if (Notification.permission === 'granted') {
-      const randomIdx = Math.floor(Math.random() * NOTIFICATION_MESSAGES.length);
-      const content = NOTIFICATION_MESSAGES[randomIdx];
+    // Note: We check Notification.permission here, but inside the try/catch we handle if it throws.
+    // On some mobile devices, the permission property lags slightly after granting, so we attempt anyway if logic dictates.
+    
+    const randomIdx = Math.floor(Math.random() * NOTIFICATION_MESSAGES.length);
+    const content = NOTIFICATION_MESSAGES[randomIdx];
 
-      // Send actual browser notification
+    let sent = false;
+
+    // Try sending actual browser notification
+    if (Notification.permission === 'granted') {
       try {
+        // Mobile specific: Service Worker registration is often required for notifications on Android Chrome PWA
+        // However, standard Notification API works for active pages.
         new Notification(content.title, {
           body: content.body,
           icon: content.icon,
           silent: false,
+          tag: 'random-notify' // prevents stacking if needed, or remove to stack
         });
+        sent = true;
       } catch (e) {
         console.error("Notification failed", e);
       }
-
-      // Log to screen
-      const now = new Date();
-      setLogs(prev => [
-        { 
-          id: Date.now(), 
-          message: `${content.title}: ${content.body}`, 
-          time: now.toLocaleTimeString() 
-        },
-        ...prev.slice(0, 49) // Keep last 50
-      ]);
     }
+
+    // Log to screen
+    const now = new Date();
+    setLogs(prev => [
+      { 
+        id: Date.now(), 
+        message: `${content.title}: ${content.body}`, 
+        time: now.toLocaleTimeString() 
+      },
+      ...prev.slice(0, 49) // Keep last 50
+    ]);
   }, []);
 
   const startNotifications = useCallback(() => {
@@ -63,7 +72,7 @@ const App: React.FC = () => {
       window.clearInterval(intervalRef.current);
     }
 
-    // Send one immediately
+    // Send one immediately to confirm it works
     sendRandomNotification();
 
     // Start interval
@@ -102,13 +111,23 @@ const App: React.FC = () => {
     }
 
     try {
+      // Important: This must be triggered by a direct user action (click)
       const result = await Notification.requestPermission();
       setPermission(result);
+      
       if (result === 'granted') {
-        startNotifications();
+        // Mobile Fix: Sometimes immediate execution fails if the permission state hasn't propagated.
+        // We set a tiny timeout to ensure the browser registers the 'granted' state before firing the first one.
+        setTimeout(() => {
+            startNotifications();
+        }, 100);
+      } else {
+        // If the user dismissed it or it was automatically denied
+        alert("Permission was not granted. If you want notifications, please enable them in your browser settings (Site Settings > Notifications).");
       }
     } catch (error) {
       console.error("Error requesting permission", error);
+      alert("Something went wrong requesting permission. Please check your browser settings.");
     }
   };
 
@@ -130,6 +149,9 @@ const App: React.FC = () => {
       >
         Allow & Start
       </button>
+      <p className="text-xs text-slate-400 max-w-xs">
+        Note: If nothing happens, check your phone's notification settings for Chrome.
+      </p>
     </div>
   );
 
@@ -140,9 +162,15 @@ const App: React.FC = () => {
       </div>
       <div>
         <h2 className="text-2xl font-bold text-slate-800 mb-2">Permission Denied</h2>
-        <p className="text-slate-600">
+        <p className="text-slate-600 mb-4">
           We cannot send notifications. Please reset permissions in your browser settings and reload the page.
         </p>
+        <button 
+            onClick={() => window.location.reload()}
+            className="text-sm text-red-600 font-semibold hover:underline"
+        >
+            Reload Page
+        </button>
       </div>
     </div>
   );
