@@ -45,8 +45,14 @@ const App: React.FC = () => {
           body: content.body,
           icon: content.icon,
           silent: false,
-          tag: 'random-notify' // prevents stacking if needed, or remove to stack
+          tag: 'random-notify', // prevents stacking if needed, or remove to stack
         });
+        
+        // Also trigger navigator.vibrate explicitly if supported to ensure vibration happens
+        if (typeof navigator.vibrate === 'function') {
+           navigator.vibrate([200, 100, 200]);
+        }
+
         sent = true;
       } catch (e) {
         console.error("Notification failed", e);
