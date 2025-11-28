@@ -23,37 +23,52 @@ const App: React.FC = () => {
   const [permission, setPermission] = useState<NotificationPermission>('default');
   const [isRunning, setIsRunning] = useState<boolean>(false);
   const [logs, setLogs] = useState<{ id: number; message: string; time: string }[]>([]);
+  const [swRegistration, setSwRegistration] = useState<ServiceWorkerRegistration | null>(null);
   
   // Refs to manage interval and mounting
   const intervalRef = useRef<number | null>(null);
+
+  // Get Service Worker Registration for system-level notifications
+  useEffect(() => {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.ready.then((registration) => {
+        setSwRegistration(registration);
+        console.log("Service Worker Ready for Notifications");
+      });
+    }
+  }, []);
   
   const sendRandomNotification = useCallback(() => {
-    // Note: We check Notification.permission here, but inside the try/catch we handle if it throws.
-    // On some mobile devices, the permission property lags slightly after granting, so we attempt anyway if logic dictates.
-    
     const randomIdx = Math.floor(Math.random() * NOTIFICATION_MESSAGES.length);
     const content = NOTIFICATION_MESSAGES[randomIdx];
-
-    let sent = false;
 
     // Try sending actual browser notification
     if (Notification.permission === 'granted') {
       try {
-        // Mobile specific: Service Worker registration is often required for notifications on Android Chrome PWA
-        // However, standard Notification API works for active pages.
-        new Notification(content.title, {
+        // Cast to 'any' to avoid TS error: Object literal may only specify known properties, and 'vibrate' does not exist in type 'NotificationOptions'
+        const options: any = {
           body: content.body,
-          icon: content.icon,
-          silent: false,
-          tag: 'random-notify', // prevents stacking if needed, or remove to stack
-        });
+          icon: content.icon, // Note: SVGs might not work as icons on all Androids, PNG URLs are safer, but text/emoji works in body.
+          // Vibrate pattern: Vibrate 200ms, pause 100ms, vibrate 200ms
+          vibrate: [200, 100, 200],
+          tag: 'random-notify',
+          renotify: true, // Required to vibrate again if tag is same
+          requireInteraction: false,
+        };
+
+        if (swRegistration) {
+          // Use ServiceWorker for system notification panel support (Critical for Mobile)
+          swRegistration.showNotification(content.title, options);
+        } else {
+          // Fallback for desktop/dev environments without active SW
+          new Notification(content.title, options);
+        }
         
-        // Also trigger navigator.vibrate explicitly if supported to ensure vibration happens
+        // Redundant fallback vibration using Navigator API
         if (typeof navigator.vibrate === 'function') {
            navigator.vibrate([200, 100, 200]);
         }
 
-        sent = true;
       } catch (e) {
         console.error("Notification failed", e);
       }
@@ -69,7 +84,7 @@ const App: React.FC = () => {
       },
       ...prev.slice(0, 49) // Keep last 50
     ]);
-  }, []);
+  }, [swRegistration]);
 
   const startNotifications = useCallback(() => {
     setIsRunning(true);
@@ -126,7 +141,7 @@ const App: React.FC = () => {
         // We set a tiny timeout to ensure the browser registers the 'granted' state before firing the first one.
         setTimeout(() => {
             startNotifications();
-        }, 100);
+        }, 500);
       } else {
         // If the user dismissed it or it was automatically denied
         alert("Permission was not granted. If you want notifications, please enable them in your browser settings (Site Settings > Notifications).");
