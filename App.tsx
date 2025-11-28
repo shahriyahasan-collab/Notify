@@ -23,48 +23,50 @@ const App: React.FC = () => {
   const [permission, setPermission] = useState<NotificationPermission>('default');
   const [isRunning, setIsRunning] = useState<boolean>(false);
   const [logs, setLogs] = useState<{ id: number; message: string; time: string }[]>([]);
-  const [swRegistration, setSwRegistration] = useState<ServiceWorkerRegistration | null>(null);
   
-  // Refs to manage interval and mounting
+  // Refs to manage interval
   const intervalRef = useRef<number | null>(null);
 
-  // Get Service Worker Registration for system-level notifications
-  useEffect(() => {
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.ready.then((registration) => {
-        setSwRegistration(registration);
-        console.log("Service Worker Ready for Notifications");
-      });
-    }
-  }, []);
-  
-  const sendRandomNotification = useCallback(() => {
+  // We do not store swRegistration in state to avoid closure staleness in setInterval.
+  // Instead, we fetch it dynamically inside sendRandomNotification.
+
+  const sendRandomNotification = useCallback(async () => {
     const randomIdx = Math.floor(Math.random() * NOTIFICATION_MESSAGES.length);
     const content = NOTIFICATION_MESSAGES[randomIdx];
 
     // Try sending actual browser notification
     if (Notification.permission === 'granted') {
       try {
-        // Cast to 'any' to avoid TS error: Object literal may only specify known properties, and 'vibrate' does not exist in type 'NotificationOptions'
+        // Cast to 'any' to avoid TS error: Object literal may only specify known properties
         const options: any = {
           body: content.body,
-          icon: content.icon, // Note: SVGs might not work as icons on all Androids, PNG URLs are safer, but text/emoji works in body.
+          icon: content.icon, 
           // Vibrate pattern: Vibrate 200ms, pause 100ms, vibrate 200ms
           vibrate: [200, 100, 200],
-          tag: 'random-notify',
-          renotify: true, // Required to vibrate again if tag is same
+          tag: 'random-notify', // Tag allows renotify to work
+          renotify: true,       // Required to vibrate again if tag is same
           requireInteraction: false,
+          silent: false
         };
 
-        if (swRegistration) {
+        // DYNAMICALLY get the registration to ensure we always have the latest one
+        // This fixes the issue where the interval holds onto an old version of the function
+        let swReg: ServiceWorkerRegistration | undefined;
+        if ('serviceWorker' in navigator) {
+            swReg = await navigator.serviceWorker.getRegistration();
+        }
+
+        if (swReg && swReg.active) {
           // Use ServiceWorker for system notification panel support (Critical for Mobile)
-          swRegistration.showNotification(content.title, options);
+          // This forces the notification into the system tray rather than just a page popup
+          await swReg.showNotification(content.title, options);
         } else {
           // Fallback for desktop/dev environments without active SW
           new Notification(content.title, options);
         }
         
-        // Redundant fallback vibration using Navigator API
+        // Explicitly trigger hardware vibration via Navigator API as a backup
+        // This ensures vibration works even if the notification vibration logic is quirky on some Androids
         if (typeof navigator.vibrate === 'function') {
            navigator.vibrate([200, 100, 200]);
         }
@@ -84,7 +86,7 @@ const App: React.FC = () => {
       },
       ...prev.slice(0, 49) // Keep last 50
     ]);
-  }, [swRegistration]);
+  }, []);
 
   const startNotifications = useCallback(() => {
     setIsRunning(true);
