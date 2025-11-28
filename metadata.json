@@ -1,0 +1,5 @@
+{
+  "name": "Random Notify",
+  "description": "A web application that sends random notifications at regular intervals with user controls.",
+  "requestFramePermissions": []
+}
