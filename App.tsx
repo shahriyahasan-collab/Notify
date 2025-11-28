@@ -1,11 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { NOTIFICATION_MESSAGES, NotificationContent } from './constants';
-import { Bell, BellOff, Play, Square, AlertTriangle, ShieldCheck, ShieldAlert } from 'lucide-react';
+import { NOTIFICATION_MESSAGES } from './constants';
 
-// Lucide-react is not in the standard library list provided, but often available. 
-// If not, I will use SVG icons directly to ensure no broken dependencies.
-// Replacing lucide-react imports with inline SVGs for safety in the final output below.
-
+// Inline SVG icons to ensure zero external dependencies causing render blocks
 const IconBell = ({ className }: { className?: string }) => (
   <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
 );
@@ -31,23 +27,6 @@ const App: React.FC = () => {
   // Refs to manage interval and mounting
   const intervalRef = useRef<number | null>(null);
   
-  // Check permission on mount
-  useEffect(() => {
-    if ('Notification' in window) {
-      setPermission(Notification.permission);
-      
-      // If already granted, we can technically start, but browsers often prefer user interaction first.
-      // However, user requirement: "every time I open this site, it will start".
-      // We will try to start automatically if granted.
-      if (Notification.permission === 'granted') {
-        startNotifications();
-      }
-    }
-    
-    return () => stopNotifications();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   const sendRandomNotification = useCallback(() => {
     if (Notification.permission === 'granted') {
       const randomIdx = Math.floor(Math.random() * NOTIFICATION_MESSAGES.length);
@@ -55,11 +34,9 @@ const App: React.FC = () => {
 
       // Send actual browser notification
       try {
-        // Note: On mobile (iOS), this only works if installed as PWA or in specific contexts.
-        // On Android Chrome, this works generally if site is HTTPS.
         new Notification(content.title, {
           body: content.body,
-          icon: content.icon, // Optional, depending on browser support
+          icon: content.icon,
           silent: false,
         });
       } catch (e) {
@@ -79,7 +56,7 @@ const App: React.FC = () => {
     }
   }, []);
 
-  const startNotifications = () => {
+  const startNotifications = useCallback(() => {
     setIsRunning(true);
     // Clear any existing interval just in case
     if (intervalRef.current) {
@@ -93,15 +70,30 @@ const App: React.FC = () => {
     intervalRef.current = window.setInterval(() => {
       sendRandomNotification();
     }, 2000);
-  };
+  }, [sendRandomNotification]);
 
-  const stopNotifications = () => {
+  const stopNotifications = useCallback(() => {
     setIsRunning(false);
     if (intervalRef.current) {
       window.clearInterval(intervalRef.current);
       intervalRef.current = null;
     }
-  };
+  }, []);
+
+  // Check permission on mount
+  useEffect(() => {
+    if ('Notification' in window) {
+      const currentPerm = Notification.permission;
+      setPermission(currentPerm);
+      
+      // Auto-start if previously granted
+      if (currentPerm === 'granted') {
+        startNotifications();
+      }
+    }
+    
+    return () => stopNotifications();
+  }, [startNotifications, stopNotifications]);
 
   const handleGrantPermission = async () => {
     if (!('Notification' in window)) {
