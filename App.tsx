@@ -18,18 +18,42 @@ const IconShield = ({ className }: { className?: string }) => (
   <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
 );
 
+// Defined vibration patterns (in milliseconds)
+const VIBRATION_PATTERNS: Record<string, { label: string, pattern: number[] }> = {
+  default: { label: 'Default (3 Pulses)', pattern: [200, 100, 200, 100, 200] },
+  short: { label: 'Short & Sharp', pattern: [100, 50, 100] },
+  heartbeat: { label: 'Heartbeat', pattern: [100, 100, 100, 400, 100, 100, 100] },
+  urgent: { label: 'Urgent', pattern: [50, 50, 50, 50, 50, 50, 50, 50, 50, 50] },
+  long: { label: 'Long Buzz', pattern: [1000] },
+  slow: { label: 'Slow Pulse', pattern: [500, 500, 500] },
+};
+
 const App: React.FC = () => {
   // State
   const [permission, setPermission] = useState<NotificationPermission>('default');
   const [isRunning, setIsRunning] = useState<boolean>(false);
   const [logs, setLogs] = useState<{ id: number; message: string; time: string }[]>([]);
+  const [vibrationKey, setVibrationKey] = useState<string>('default');
   
-  // Refs to manage interval
+  // Refs to manage interval and current configuration without restarting interval
   const intervalRef = useRef<number | null>(null);
+  const vibrationPatternRef = useRef<number[]>(VIBRATION_PATTERNS['default'].pattern);
+
+  const handleVibrationChange = (key: string) => {
+    setVibrationKey(key);
+    const newPattern = VIBRATION_PATTERNS[key].pattern;
+    vibrationPatternRef.current = newPattern;
+    
+    // Preview vibration
+    if (navigator.vibrate) {
+      navigator.vibrate(newPattern);
+    }
+  };
 
   const sendRandomNotification = useCallback(async () => {
     const randomIdx = Math.floor(Math.random() * NOTIFICATION_MESSAGES.length);
     const content = NOTIFICATION_MESSAGES[randomIdx];
+    const currentPattern = vibrationPatternRef.current;
 
     // Log to screen
     const now = new Date();
@@ -51,7 +75,7 @@ const App: React.FC = () => {
       const options: any = {
         body: content.body,
         icon: content.icon, // In a real app, this should be an image URL, not an emoji
-        vibrate: [200, 100, 200, 100, 200], // Long vibration pattern
+        vibrate: currentPattern, // Use dynamic pattern
         tag: 'random-notify', 
         renotify: true, // Crucial for vibrating on subsequent notifications
         requireInteraction: true, // Keeps it in the panel until clicked
@@ -75,7 +99,7 @@ const App: React.FC = () => {
       // If the notification itself doesn't trigger vibration (some OS settings block it),
       // this tries to vibrate the phone directly while the browser tab is open.
       if (navigator.vibrate) {
-        navigator.vibrate([200, 100, 200, 100, 200]);
+        navigator.vibrate(currentPattern);
       }
 
     } catch (e) {
@@ -223,7 +247,7 @@ const App: React.FC = () => {
       </div>
 
       {/* Control Actions */}
-      <div className="p-6 flex-none">
+      <div className="p-6 flex-none space-y-6">
         {isRunning ? (
           <button
             onClick={stopNotifications}
@@ -249,6 +273,32 @@ const App: React.FC = () => {
             </div>
           </button>
         )}
+
+        {/* Vibration Controls */}
+        <div className="bg-white rounded-xl p-4 border border-slate-200 shadow-sm">
+          <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
+            Vibration Pattern
+          </label>
+          <div className="relative">
+            <select
+              value={vibrationKey}
+              onChange={(e) => handleVibrationChange(e.target.value)}
+              className="w-full appearance-none bg-slate-50 border border-slate-200 text-slate-700 py-3 px-4 pr-8 rounded-lg leading-tight focus:outline-none focus:bg-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
+            >
+              {Object.entries(VIBRATION_PATTERNS).map(([key, config]) => (
+                <option key={key} value={key}>
+                  {config.label}
+                </option>
+              ))}
+            </select>
+            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-slate-500">
+              <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
+            </div>
+          </div>
+          <p className="text-xs text-slate-400 mt-2 italic">
+            Changing this previews the vibration on your phone immediately.
+          </p>
+        </div>
       </div>
 
       {/* Log Feed */}
