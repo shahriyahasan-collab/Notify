@@ -9,7 +9,11 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   event.respondWith(
     fetch(event.request).catch(() => {
-      return new Response('Offline');
+      // Return a simple offline response or index.html if offline
+      // This is crucial for the 'add to homescreen' to work reliably
+      return caches.match(event.request).then(response => {
+         return response || new Response('Offline', { status: 503, statusText: 'Offline' });
+      });
     })
   );
 });
@@ -18,15 +22,14 @@ self.addEventListener('fetch', (event) => {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   
+  // Focus the open window if available
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
-      // If a window is already open, focus it
       for (const client of clientList) {
         if (client.url && 'focus' in client) {
           return client.focus();
         }
       }
-      // Otherwise open a new window (optional, usually focusing is enough for this app)
       if (clients.openWindow) {
         return clients.openWindow('/');
       }

@@ -27,54 +27,9 @@ const App: React.FC = () => {
   // Refs to manage interval
   const intervalRef = useRef<number | null>(null);
 
-  // We do not store swRegistration in state to avoid closure staleness in setInterval.
-  // Instead, we fetch it dynamically inside sendRandomNotification.
-
   const sendRandomNotification = useCallback(async () => {
     const randomIdx = Math.floor(Math.random() * NOTIFICATION_MESSAGES.length);
     const content = NOTIFICATION_MESSAGES[randomIdx];
-
-    // Try sending actual browser notification
-    if (Notification.permission === 'granted') {
-      try {
-        // Cast to 'any' to avoid TS error: Object literal may only specify known properties
-        const options: any = {
-          body: content.body,
-          icon: content.icon, 
-          // Vibrate pattern: Vibrate 200ms, pause 100ms, vibrate 200ms
-          vibrate: [200, 100, 200],
-          tag: 'random-notify', // Tag allows renotify to work
-          renotify: true,       // Required to vibrate again if tag is same
-          requireInteraction: false,
-          silent: false
-        };
-
-        // DYNAMICALLY get the registration to ensure we always have the latest one
-        // This fixes the issue where the interval holds onto an old version of the function
-        let swReg: ServiceWorkerRegistration | undefined;
-        if ('serviceWorker' in navigator) {
-            swReg = await navigator.serviceWorker.getRegistration();
-        }
-
-        if (swReg && swReg.active) {
-          // Use ServiceWorker for system notification panel support (Critical for Mobile)
-          // This forces the notification into the system tray rather than just a page popup
-          await swReg.showNotification(content.title, options);
-        } else {
-          // Fallback for desktop/dev environments without active SW
-          new Notification(content.title, options);
-        }
-        
-        // Explicitly trigger hardware vibration via Navigator API as a backup
-        // This ensures vibration works even if the notification vibration logic is quirky on some Androids
-        if (navigator.vibrate) {
-           navigator.vibrate([200, 100, 200]);
-        }
-
-      } catch (e) {
-        console.error("Notification failed", e);
-      }
-    }
 
     // Log to screen
     const now = new Date();
@@ -86,11 +41,51 @@ const App: React.FC = () => {
       },
       ...prev.slice(0, 49) // Keep last 50
     ]);
+
+    // Check permission again just in case
+    if (Notification.permission !== 'granted') return;
+
+    try {
+      // Common options
+      // Cast to 'any' because 'vibrate' is strictly part of ServiceWorkerNotificationOptions, not standard NotificationOptions in some TS libs
+      const options: any = {
+        body: content.body,
+        icon: content.icon, // In a real app, this should be an image URL, not an emoji
+        vibrate: [200, 100, 200, 100, 200], // Long vibration pattern
+        tag: 'random-notify', 
+        renotify: true, // Crucial for vibrating on subsequent notifications
+        requireInteraction: true, // Keeps it in the panel until clicked
+        silent: false,
+      };
+
+      // METHOD 1: Primary - Service Worker (Required for Android System Panel & reliable Vibration)
+      if ('serviceWorker' in navigator) {
+        // We use .ready to wait until the SW is actually active. 
+        // This prevents the "Closure Trap" where we might try to use a registration that isn't fully ready.
+        const registration = await navigator.serviceWorker.ready;
+        
+        // This call pushes the notification to the System Notification Tray
+        await registration.showNotification(content.title, options);
+      } else {
+        // METHOD 2: Fallback - Legacy (Mostly for desktop or if SW fails)
+        new Notification(content.title, options);
+      }
+
+      // METHOD 3: Backup Vibration - Direct Hardware API
+      // If the notification itself doesn't trigger vibration (some OS settings block it),
+      // this tries to vibrate the phone directly while the browser tab is open.
+      if (navigator.vibrate) {
+        navigator.vibrate([200, 100, 200, 100, 200]);
+      }
+
+    } catch (e) {
+      console.error("Notification failed", e);
+    }
   }, []);
 
   const startNotifications = useCallback(() => {
     setIsRunning(true);
-    // Clear any existing interval just in case
+    // Clear any existing interval
     if (intervalRef.current) {
       window.clearInterval(intervalRef.current);
     }
@@ -133,43 +128,37 @@ const App: React.FC = () => {
       return;
     }
 
-    // Robust permission requester that handles both Promise and Callback based APIs
-    // This is critical for mobile compatibility where implementations vary
-    const requestPermissionSafely = (): Promise<NotificationPermission> => {
-      return new Promise((resolve) => {
-        // We pass the callback to support older browsers/webviews
-        const permissionPromise = Notification.requestPermission((result) => {
-          resolve(result);
-        });
-
-        // If it returns a promise (modern standard), we use that too
-        if (permissionPromise) {
-          permissionPromise.then(resolve).catch((error) => {
-            console.error("Permission request error:", error);
-            // If promise fails, we can check standard property or assume default/denied
-            resolve(Notification.permission); 
-          });
-        }
-      });
-    };
-
+    // Explicitly ask for permission
+    // We do this inside a direct click handler which is required by Mobile Chrome
     try {
-      const result = await requestPermissionSafely();
+      let result = Notification.permission;
+      
+      if (result !== 'granted') {
+        result = await Notification.requestPermission();
+      }
+
       setPermission(result);
       
       if (result === 'granted') {
-        // Mobile Fix: Sometimes immediate execution fails if the permission state hasn't propagated.
-        // We set a tiny timeout to ensure the browser registers the 'granted' state before firing the first one.
+        // Register SW immediately if not already done, just to be safe
+        if ('serviceWorker' in navigator) {
+           navigator.serviceWorker.register('/sw.js');
+        }
+        
+        // Small delay to let the OS register the permission change before firing the first alert
         setTimeout(() => {
             startNotifications();
         }, 500);
       } else if (result === 'denied') {
-        // If the user dismissed it or it was automatically denied
-        alert("Permission was denied. Please enable notifications in your browser settings.");
+        alert("Permission was denied. Please enable notifications in your browser settings (Site Settings > Notifications).");
       }
     } catch (error) {
       console.error("Error requesting permission", error);
-      alert("Something went wrong requesting permission. Please check your browser settings.");
+      // Fallback for older browsers using callback style
+      Notification.requestPermission((res) => {
+        setPermission(res);
+        if (res === 'granted') startNotifications();
+      });
     }
   };
 
@@ -182,7 +171,8 @@ const App: React.FC = () => {
       <div>
         <h2 className="text-2xl font-bold text-slate-800 mb-2">Enable Notifications</h2>
         <p className="text-slate-500">
-          We need permission to send you random alerts every 2 seconds.
+          Click below to allow notifications. <br/>
+          <span className="text-xs text-slate-400">(Your phone will vibrate on alerts)</span>
         </p>
       </div>
       <button
@@ -191,9 +181,6 @@ const App: React.FC = () => {
       >
         Allow & Start
       </button>
-      <p className="text-xs text-slate-400 max-w-xs">
-        Note: If the popup doesn't appear, notifications might be blocked in your browser settings.
-      </p>
     </div>
   );
 
@@ -205,7 +192,7 @@ const App: React.FC = () => {
       <div>
         <h2 className="text-2xl font-bold text-slate-800 mb-2">Permission Denied</h2>
         <p className="text-slate-600 mb-4">
-          We cannot send notifications. Please reset permissions in your browser settings and reload the page.
+          Please reset permissions in your browser settings and reload the page.
         </p>
         <button 
             onClick={() => window.location.reload()}
@@ -231,7 +218,7 @@ const App: React.FC = () => {
           {isRunning ? 'Sending Alerts...' : 'Notifications Paused'}
         </h1>
         <p className="opacity-90 mt-2 text-sm">
-          {isRunning ? 'You should receive a new notification every 2 seconds.' : 'Press start to resume.'}
+          {isRunning ? 'Check your status bar / notification tray.' : 'Press start to resume.'}
         </p>
       </div>
 
